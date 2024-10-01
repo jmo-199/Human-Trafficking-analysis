@@ -1,0 +1,260 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+```{r}
+htd <- read.csv("C:\\Users\\moore\\OneDrive\\Desktop\\Fall 2023\\Intro to statistics\\project\\Statistics Project\\Statistics Project\\htd_transformed.csv")
+```
+
+```{r}
+library(tidyverse)
+library(ggthemes)
+library(ggrepel)
+library(boot)
+library(broom)
+library(lindia)
+```
+```{r}
+library(xts)
+library(tsibble)
+library(lubridate)
+```
+
+
+
+
+```{r}
+anova <- aov(CLEARED_COUNT ~ ACTUAL_COUNT, data = htd)
+summary(anova)
+anova2 <-aov(JUVENILE_CLEARED_COUNT ~ ACTUAL_COUNT, data = htd)
+summary(anova2)
+```
+
+```{r}
+model2 <- lm(ACTUAL_COUNT ~ JUVENILE_CLEARED_COUNT + CLEARED_COUNT, htd)
+model2$coefficients
+```
+
+```{r}
+htd |>
+  ggplot(aes(x = CLEARED_COUNT, y = ACTUAL_COUNT, color = REGION_NAME)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  labs(title = "Scatter Plot and Regression Lines",
+       subtitle = "",
+       x = "CLEARED_COUNT", y = "ACTUAL_COUNT") +
+  theme_minimal()
+
+htd |>
+  ggplot(aes(x = JUVENILE_CLEARED_COUNT, y = ACTUAL_COUNT, color = REGION_NAME)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  labs(title = "Scatter Plot and Regression Lines",
+       subtitle = "",
+       x = "Juvenile clear counts", y = "Actual counts") +
+  theme_minimal()
+
+
+```
+
+```{r}
+htd$DATA_YEAR <- as.Date(paste(htd$DATA_YEAR, "-01-01", sep = ""), format = "%Y-%m-%d")
+htd_1 <- htd |>
+  select(DATA_YEAR, REGION_NAME, ACTUAL_COUNT, CLEARED_COUNT, JUVENILE_CLEARED_COUNT) |>
+  distinct()
+htd_1 <- htd_1|>
+  group_by(DATA_YEAR, REGION_NAME) |>
+  summarise(SUM_ACTUAL_COUNT = sum(ACTUAL_COUNT),
+            SUM_JUVENILE_CLEARED_COUNT = sum(JUVENILE_CLEARED_COUNT),
+            SUM_CLEARED_COUNT = sum(CLEARED_COUNT))
+```
+```{r}
+htd_ts1 <- htd_1 |>
+  as_tibble(index = DATA_YEAR, key = c("SUM_ACTUAL_COUNT", "SUM_JUVENILE_CLEARED_COUNT", "SUM_CLEARED_COUNT"))
+fit_linear_models <- function(region_name) {
+  region_data <- htd_ts1 %>% filter(REGION_NAME == region_name)
+
+  # Linear model for actual counts
+  actual_counts_model <- lm(SUM_ACTUAL_COUNT ~ DATA_YEAR, data = region_data)
+  print(paste("Linear model for actual counts in", region_name))
+  print(summary(actual_counts_model))
+
+  # Linear model for cleared counts
+  cleared_counts_model <- lm(SUM_CLEARED_COUNT ~ DATA_YEAR, data = region_data)
+  print(paste("Linear model for cleared counts in", region_name))
+  print(summary(cleared_counts_model))
+
+  # Linear model for juvenile cleared counts
+  juvenile_cleared_counts_model <- lm(SUM_JUVENILE_CLEARED_COUNT ~ DATA_YEAR, data = region_data)
+  print(paste("Linear model for juvenile cleared counts in", region_name))
+  print(summary(juvenile_cleared_counts_model))
+}
+
+# Apply the function to each region
+fit_linear_models("Midwest")
+fit_linear_models("West")
+fit_linear_models("South")
+fit_linear_models("Northeast")
+```
+
+
+```{r}
+htd_ts_midwest <- htd_1 |>
+  filter(REGION_NAME == "Midwest") |>
+  as_tsibble(index = DATA_YEAR, key = c("SUM_ACTUAL_COUNT", "SUM_JUVENILE_CLEARED_COUNT", "SUM_CLEARED_COUNT"))
+htd_ts_west <- htd_1 |>
+  filter(REGION_NAME == "West") |>
+  as_tsibble(index = DATA_YEAR, key = c("SUM_ACTUAL_COUNT", "SUM_JUVENILE_CLEARED_COUNT", "SUM_CLEARED_COUNT"))
+htd_ts_south <- htd_1 |>
+  filter(REGION_NAME == "South") |>
+  as_tsibble(index = DATA_YEAR, key = c("SUM_ACTUAL_COUNT", "SUM_JUVENILE_CLEARED_COUNT", "SUM_CLEARED_COUNT"))
+htd_ts_northeast <- htd_1 |>
+  filter(REGION_NAME == "Northeast") |>
+  as_tsibble(index = DATA_YEAR, key = c("SUM_ACTUAL_COUNT", "SUM_JUVENILE_CLEARED_COUNT", "SUM_CLEARED_COUNT"))
+```
+
+
+```{r}
+htd_ts_midwest %>%
+  filter(!is.na(SUM_ACTUAL_COUNT)) %>%
+  index_by(half_year = floor_date(DATA_YEAR, '6 months')) %>%
+  summarise(avg_actual_counts = mean(SUM_ACTUAL_COUNT, na.rm = TRUE)) %>%
+  ggplot(mapping = aes(x = half_year, y = avg_actual_counts)) +
+  geom_line() +
+  geom_smooth(span = 0.3, se = FALSE) +
+  labs(title = "Average Actual Counts Over Time by midwest",
+       subtitle = "(by half year)") +
+  scale_x_date(breaks = "1 year", labels = function(x) year(x)) +
+  theme_minimal()
+htd_ts_midwest %>%
+  filter(!is.na(SUM_JUVENILE_CLEARED_COUNT)) %>%
+  index_by(half_year = floor_date(DATA_YEAR, '6 months')) %>%
+  summarise(avg_juvenile_counts = mean(SUM_JUVENILE_CLEARED_COUNT, na.rm = TRUE)) %>%
+  ggplot(mapping = aes(x = half_year, y = avg_juvenile_counts)) +
+  geom_line() +
+  geom_smooth(span = 0.3, color = 'blue', se=FALSE) +
+  labs(title = "Average juvenile cleared Counts Over Time for midwest",
+       subtitle = "(by half year)") +
+  scale_x_date(breaks = "1 year", labels = \(x) year(x)) +
+  theme_minimal()
+htd_ts_midwest %>%
+  filter(!is.na(SUM_CLEARED_COUNT)) %>%
+  index_by(half_year = floor_date(DATA_YEAR, '6 months')) %>%
+  summarise(avg_cleared_counts = mean(SUM_CLEARED_COUNT, na.rm = TRUE)) %>%
+  ggplot(mapping = aes(x = half_year, y = avg_cleared_counts)) +
+  geom_line() +
+  geom_smooth(span = 0.3, color = 'blue', se=FALSE) +
+  labs(title = "Average  cleared Counts Over Time for midwest",
+       subtitle = "(by half year)") +
+  scale_x_date(breaks = "1 year", labels = \(x) year(x)) +
+  theme_minimal()
+```
+```{r}
+htd_ts_west %>%
+  filter(!is.na(SUM_ACTUAL_COUNT)) %>%
+  index_by(half_year = floor_date(DATA_YEAR, '6 months')) %>%
+  summarise(avg_actual_counts = mean(SUM_ACTUAL_COUNT, na.rm = TRUE)) %>%
+  ggplot(mapping = aes(x = half_year, y = avg_actual_counts)) +
+  geom_line() +
+  geom_smooth(span = 0.3, se = FALSE) +
+  labs(title = "Average Actual Counts Over Time by west region",
+       subtitle = "(by half year)") +
+  scale_x_date(breaks = "1 year", labels = function(x) year(x)) +
+  theme_minimal()
+htd_ts_west %>%
+  filter(!is.na(SUM_JUVENILE_CLEARED_COUNT)) %>%
+  index_by(half_year = floor_date(DATA_YEAR, '6 months')) %>%
+  summarise(avg_juvenile_counts = mean(SUM_JUVENILE_CLEARED_COUNT, na.rm = TRUE)) %>%
+  ggplot(mapping = aes(x = half_year, y = avg_juvenile_counts)) +
+  geom_line() +
+  geom_smooth(span = 0.3, color = 'blue', se=FALSE) +
+  labs(title = "Average juvenile cleared Counts Over Time for west region",
+       subtitle = "(by half year)") +
+  scale_x_date(breaks = "1 year", labels = \(x) year(x)) +
+  theme_minimal()
+htd_ts_west %>%
+  filter(!is.na(SUM_CLEARED_COUNT)) %>%
+  index_by(half_year = floor_date(DATA_YEAR, '6 months')) %>%
+  summarise(avg_cleared_counts = mean(SUM_CLEARED_COUNT, na.rm = TRUE)) %>%
+  ggplot(mapping = aes(x = half_year, y = avg_cleared_counts)) +
+  geom_line() +
+  geom_smooth(span = 0.3, color = 'blue', se=FALSE) +
+  labs(title = "Average  cleared Counts Over Time for west region",
+       subtitle = "(by half year)") +
+  scale_x_date(breaks = "1 year", labels = \(x) year(x)) +
+  theme_minimal()
+```
+```{r}
+htd_ts_south %>%
+  filter(!is.na(SUM_ACTUAL_COUNT)) %>%
+  index_by(half_year = floor_date(DATA_YEAR, '6 months')) %>%
+  summarise(avg_actual_counts = mean(SUM_ACTUAL_COUNT, na.rm = TRUE)) %>%
+  ggplot(mapping = aes(x = half_year, y = avg_actual_counts)) +
+  geom_line() +
+  geom_smooth(span = 0.3, se = FALSE) +
+  labs(title = "Average Actual Counts Over Time by south region",
+       subtitle = "(by half year)") +
+  scale_x_date(breaks = "1 year", labels = function(x) year(x)) +
+  theme_minimal()
+htd_ts_south %>%
+  filter(!is.na(SUM_JUVENILE_CLEARED_COUNT)) %>%
+  index_by(half_year = floor_date(DATA_YEAR, '6 months')) %>%
+  summarise(avg_juvenile_counts = mean(SUM_JUVENILE_CLEARED_COUNT, na.rm = TRUE)) %>%
+  ggplot(mapping = aes(x = half_year, y = avg_juvenile_counts)) +
+  geom_line() +
+  geom_smooth(span = 0.3, color = 'blue', se=FALSE) +
+  labs(title = "Average juvenile cleared Counts Over Time for south region",
+       subtitle = "(by half year)") +
+  scale_x_date(breaks = "1 year", labels = \(x) year(x)) +
+  theme_minimal()
+htd_ts_south %>%
+  filter(!is.na(SUM_CLEARED_COUNT)) %>%
+  index_by(half_year = floor_date(DATA_YEAR, '6 months')) %>%
+  summarise(avg_cleared_counts = mean(SUM_CLEARED_COUNT, na.rm = TRUE)) %>%
+  ggplot(mapping = aes(x = half_year, y = avg_cleared_counts)) +
+  geom_line() +
+  geom_smooth(span = 0.3, color = 'blue', se=FALSE) +
+  labs(title = "Average  cleared Counts Over Time for south region",
+       subtitle = "(by half year)") +
+  scale_x_date(breaks = "1 year", labels = \(x) year(x)) +
+  theme_minimal()
+```
+```{r}
+htd_ts_northeast %>%
+  filter(!is.na(SUM_ACTUAL_COUNT)) %>%
+  index_by(half_year = floor_date(DATA_YEAR, '6 months')) %>%
+  summarise(avg_actual_counts = mean(SUM_ACTUAL_COUNT, na.rm = TRUE)) %>%
+  ggplot(mapping = aes(x = half_year, y = avg_actual_counts)) +
+  geom_line() +
+  geom_smooth(span = 0.3, se = FALSE) +
+  labs(title = "Average Actual Counts Over Time by northeast region",
+       subtitle = "(by half year)") +
+  scale_x_date(breaks = "1 year", labels = function(x) year(x)) +
+  theme_minimal()
+htd_ts_northeast %>%
+  filter(!is.na(SUM_JUVENILE_CLEARED_COUNT)) %>%
+  index_by(half_year = floor_date(DATA_YEAR, '6 months')) %>%
+  summarise(avg_juvenile_counts = mean(SUM_JUVENILE_CLEARED_COUNT, na.rm = TRUE)) %>%
+  ggplot(mapping = aes(x = half_year, y = avg_juvenile_counts)) +
+  geom_line() +
+  geom_smooth(span = 0.3, color = 'blue', se=FALSE) +
+  labs(title = "Average juvenile cleared Counts Over Time for northeast region",
+       subtitle = "(by half year)") +
+  scale_x_date(breaks = "1 year", labels = \(x) year(x)) +
+  theme_minimal()
+htd_ts_northeast %>%
+  filter(!is.na(SUM_CLEARED_COUNT)) %>%
+  index_by(half_year = floor_date(DATA_YEAR, '6 months')) %>%
+  summarise(avg_cleared_counts = mean(SUM_CLEARED_COUNT, na.rm = TRUE)) %>%
+  ggplot(mapping = aes(x = half_year, y = avg_cleared_counts)) +
+  geom_line() +
+  geom_smooth(span = 0.3, color = 'blue', se=FALSE) +
+  labs(title = "Average  cleared Counts Over Time for northeast region",
+       subtitle = "(by half year)") +
+  scale_x_date(breaks = "1 year", labels = \(x) year(x)) +
+  theme_minimal()
+```
+
+
+
